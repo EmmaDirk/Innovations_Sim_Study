@@ -14,6 +14,7 @@
 #   boot_B  : number of bootstrap draws used inside the combined 2-step estimator
 #   base_seed      : base seed for reproducibility
 #   show_progress  : show a progress bar (TRUE/FALSE)
+#   n_cores        : number of parallel workers (NULL uses detectCores()-1)
 #
 # Returns:
 #   list(summary=..., draws=..., settings=...)
@@ -21,137 +22,204 @@
 #     - summary: averages by aU and method (mean beta_hat, mean se_hat, mean bias)
 # -----------------------------------------------------------------
 
-simulate_bias_curves <- function(pop_df,                     # population data frame
-                                 b1,                         # TRUE effect for bias calc
-                                 n_srs,                      # sample size for SRS
-                                 n_nps,                      # sample sizes for NPS
-                                 aX,                         # effect of X on selection
-                                 aY,                         # effect of Y on selection
-                                 aZ,                         # effect of Z on selection
-                                 aU_vals,                    # vector of effect of U on selection
-                                 R = 200,                    # number of replications
-                                 boot_B = 200,               # number of bootstrap draws for combined estimator
-                                 base_seed = 1L,             # base seed for reproducibility
-                                 show_progress = TRUE) {     # show progress bar
+simulation_wrapper <- function(pop_df,                       # population data frame
+                               b1,                           # TRUE effect for bias calc
+                               n_srs,                        # sample size for SRS
+                               n_nps,                        # sample sizes for NPS
+                               aX,                           # effect of X on selection
+                               aY,                           # effect of Y on selection
+                               aZ,                           # effect of Z on selection
+                               aU_vals,                      # vector of effect of U on selection
+                               R = 200,                      # number of replications
+                               boot_B = 200,                 # number of bootstrap draws for combined estimator
+                               base_seed = 1L,               # base seed for reproducibility
+                               show_progress = TRUE,         # show progress bar
+                               n_cores = NULL) {             # number of parallel workers
 
-  # checks: population must have all variables needed
+  # -----------------------------
+  # 0) Basic input checks
+  # -----------------------------
+
+  # population must contain these variables
   need_pop <- c("Y", "X", "Z", "U")
+
+  # stop if any are missing
   miss <- setdiff(need_pop, names(pop_df))
   if (length(miss) > 0) stop(paste("Population df missing:", paste(miss, collapse = ", ")))
 
-  # check: b1 must be numeric scalar
+  # b1 must be a single finite number
   if (!is.numeric(b1) || length(b1) != 1 || !is.finite(b1)) {
     stop("b1 must be a single finite numeric value.")
   }
 
-  # check: base_seed must be numeric scalar
+  # base_seed must be a single finite number
   if (!is.numeric(base_seed) || length(base_seed) != 1 || !is.finite(base_seed)) {
     stop("base_seed must be a single finite numeric value.")
   }
 
-  # convert base_seed to integer (if not already)
+  # convert seed to integer (just to be safe)
   base_seed <- as.integer(base_seed)
 
-  # storage for replication-level results
-  # we have length(aU_vals) * R replications, and 3 methods per replication
-  out_list <- vector("list", length = length(aU_vals) * R * 3L)
-
-  # counter for storing results in out_list
-  k <- 0L
-
-  # progress bar setup
-  # total number of iterations
-  total_iters <- length(aU_vals) * R
-
-  # set up progress bar if requested
-  if (show_progress) {
-
-    # use txtProgressBar for a simple text-based progress bar
-    pb <- txtProgressBar(min = 0, max = total_iters, style = 3)
-
-    # counter for updating progress bar
-    iter <- 0L
-
-    # ensure progress bar is closed on exit (even if error occurs)
-    on.exit(close(pb), add = TRUE)
+  # pbapply must be installed
+  if (!requireNamespace("pbapply", quietly = TRUE)) {
+    stop("Package 'pbapply' is required. Install it with install.packages('pbapply').")
   }
 
-  # loop over aU values and replications
-  for (i in seq_along(aU_vals)) {
+  # -----------------------------
+  # 1) Decide how many workers
+  # -----------------------------
 
-    # current aU value for this iteration
+  # if n_cores is NULL, use all logical cores minus 1
+  if (is.null(n_cores)) {
+    n_cores <- max(1L, parallel::detectCores(logical = TRUE) - 1L)
+  }
+
+  # enforce integer >= 1
+  n_cores <- as.integer(n_cores)
+  if (n_cores < 1L) stop("n_cores must be >= 1")
+
+  # -----------------------------
+  # 2) Create the task grid
+  # -----------------------------
+
+  # each task is one pair (aU index i, replication r)
+  grid <- expand.grid(
+    i = seq_along(aU_vals),
+    rep = seq_len(R),
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  # total number of tasks
+  n_tasks <- nrow(grid)
+
+  # -----------------------------
+  # 3) Start a PSOCK cluster
+  # -----------------------------
+
+  # PSOCK works on Windows/Mac/Linux
+  cl <- parallel::makeCluster(n_cores)
+
+  # always stop cluster at the end (also on error)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  # set a reproducible RNG stream across workers
+  parallel::clusterSetRNGStream(cl, iseed = base_seed)
+
+  # -----------------------------
+  # 4) Export objects to workers
+  # -----------------------------
+
+  # workers need:
+  #   - the population data
+  #   - constants and tuning parameters
+  #   - your sampling + analysis functions
+  parallel::clusterExport(
+    cl,
+    varlist = c(
+      "pop_df", "b1", "n_srs", "n_nps", "aX", "aY", "aZ", "aU_vals", "boot_B", "base_seed",
+      "srs", "nps",
+      "analyze_srs", "analyze_nps", "analyze_combined_ipw_bootstrap"
+    ),
+    envir = environment()
+  )
+
+  # -----------------------------
+  # 5) One-task worker function
+  # -----------------------------
+
+  # this runs exactly one (aU, rep) combination and returns 3 rows:
+  #   - SRS estimate
+  #   - NPS estimate
+  #   - Combined/IPW estimate
+  worker_fun <- function(task_row) {
+
+    # unpack the task identifiers
+    i <- task_row[["i"]]
+    r <- task_row[["rep"]]
+
+    # current aU value
     aU <- aU_vals[i]
 
-    # for each replication within this aU value:
-    for (r in seq_len(R)) {
+    # deterministic seeds per task:
+    # ensures identical results regardless of number of cores / scheduling
+    seed_srs  <- base_seed + 100000L * i + 10L * r + 1L
+    seed_nps  <- base_seed + 100000L * i + 10L * r + 2L
+    seed_boot <- base_seed + 100000L * i + 10L * r + 3L
 
-      # 1) draw samples
-      # base seeds + reproducible seeds for each replication
-      seed_srs <- base_seed + 100000L * i + 10L * r + 1L
-      seed_nps <- base_seed + 100000L * i + 10L * r + 2L
+    # draw the SRS
+    srs_df <- srs(pop_df, n = n_srs, seed = seed_srs)
 
-      # draw samples
-      srs_df <- srs(pop_df, n = n_srs, seed = seed_srs)
-      nps_df <- nps(pop_df, n = n_nps, aX = aX, aY = aY, aZ = aZ, aU = aU, seed = seed_nps)
+    # draw the NPS with selection parameters (including current aU)
+    nps_df <- nps(pop_df, n = n_nps, aX = aX, aY = aY, aZ = aZ, aU = aU, seed = seed_nps)
 
-      # 2) analyze SRS (Y ~ X + Z)
-      res_srs <- analyze_srs(srs_df)
+    # fit SRS outcome model
+    res_srs <- analyze_srs(srs_df)
 
-      # update counter and store results for SRS
-      k <- k + 1L
-      out_list[[k]] <- data.frame(
-        aU = aU,
-        rep = r,
-        method = "SRS: OLS(Y~X+Z)",
-        beta_hat = res_srs$beta_X,           # raw estimate
-        se_hat = res_srs$se_X,               # raw SE
-        bias = res_srs$beta_X - b1           # bias vs provided b1
-      )
+    # store SRS result
+    row_srs <- data.frame(
+      aU = aU,
+      rep = r,
+      method = "SRS: OLS(Y~X+Z)",
+      beta_hat = res_srs$beta_X,
+      se_hat = res_srs$se_X,
+      bias = res_srs$beta_X - b1
+    )
 
-      # 3) analyze NPS (Y ~ X + Z + U)
-      res_nps <- analyze_nps(nps_df)
+    # fit NPS outcome model (includes U)
+    res_nps <- analyze_nps(nps_df)
 
-      # update counter and store results for NPS
-      k <- k + 1L
-      out_list[[k]] <- data.frame(
-        aU = aU,
-        rep = r,
-        method = "NPS: OLS(Y~X+Z+U)",
-        beta_hat = res_nps$beta_X,
-        se_hat = res_nps$se_X,
-        bias = res_nps$beta_X - b1
-      )
+    # store NPS result
+    row_nps <- data.frame(
+      aU = aU,
+      rep = r,
+      method = "NPS: OLS(Y~X+Z+U)",
+      beta_hat = res_nps$beta_X,
+      se_hat = res_nps$se_X,
+      bias = res_nps$beta_X - b1
+    )
 
-      # 4) combined 2-step with bootstrap SE (selection on X,Z; outcome on NPS with U)
-      # reproducible seeds for bootstrap (different from sample draws)
-      seed_boot <- base_seed + 100000L * i + 10L * r + 3L
+    # fit combined two-step estimator (bootstrap SE)
+    res_ipw <- analyze_combined_ipw_bootstrap(srs_df, nps_df, B = boot_B, seed = seed_boot)
 
-      # analyze combined sample with bootstrap SE
-      res_ipw <- analyze_combined_ipw_bootstrap(srs_df, nps_df, B = boot_B, seed = seed_boot)
+    # store combined result
+    row_ipw <- data.frame(
+      aU = aU,
+      rep = r,
+      method = "Combined: IPW + U (boot SE)",
+      beta_hat = res_ipw$beta_X,
+      se_hat = res_ipw$se_boot,
+      bias = res_ipw$beta_X - b1
+    )
 
-      # update counter and store results for combined estimator
-      k <- k + 1L
-      out_list[[k]] <- data.frame(
-        aU = aU,
-        rep = r,
-        method = "Combined: IPW + U (boot SE)",
-        beta_hat = res_ipw$beta_X,
-        se_hat = res_ipw$se_boot,           
-        bias = res_ipw$beta_X - b1
-      )
-
-      # progress update
-      if (show_progress) {
-        iter <- iter + 1L
-        setTxtProgressBar(pb, iter)
-      }
-    }
+    # return 3-row data.frame for this task
+    rbind(row_srs, row_nps, row_ipw)
   }
 
-  # convert list to data frame
-  draws <- do.call(rbind, out_list)
+  # -----------------------------
+  # 6) Run tasks in parallel (with pbapply progress bar)
+  # -----------------------------
 
-  # summarize for plotting (mean lines)
+  # pbapply controls whether the progress bar is shown
+  pbapply::pboptions(type = if (show_progress) "timer" else "none")
+
+  # pblapply will use the cluster and show a progress bar in the master
+  res_list <- pbapply::pblapply(
+    X = split(grid, seq_len(n_tasks)),   # list of 1-row data.frames
+    FUN = worker_fun,
+    cl = cl
+  )
+
+  # -----------------------------
+  # 7) Combine all replication draws
+  # -----------------------------
+
+  draws <- do.call(rbind, res_list)
+
+  # -----------------------------
+  # 8) Summarize for plotting
+  # -----------------------------
+
   summary <- aggregate(
     cbind(beta_hat, se_hat, bias) ~ aU + method,
     data = draws,
@@ -159,7 +227,10 @@ simulate_bias_curves <- function(pop_df,                     # population data f
     na.rm = TRUE
   )
 
-  # save results
+  # -----------------------------
+  # 9) Return everything
+  # -----------------------------
+
   list(
     summary = summary,
     draws = draws,
@@ -171,7 +242,8 @@ simulate_bias_curves <- function(pop_df,                     # population data f
       aU_vals = aU_vals,
       R = R,
       boot_B = boot_B,
-      base_seed = base_seed
+      base_seed = base_seed,
+      n_cores = n_cores
     )
   )
 }

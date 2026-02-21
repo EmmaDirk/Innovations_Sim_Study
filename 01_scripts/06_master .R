@@ -67,12 +67,12 @@ out_U_005 <- simulation_wrapper(
   b1 = 0.1,                                                        # TRUE effect for bias calc
   n_srs = 1000,                                                    # sample size for SRS
   n_nps = 200,                                                     # sample sizes for NPS
-  aX = 0.1,                                                        # selection effect of X (small)
-  aY = 0.15,                                                       # selection effect of Y (small)
-  aZ = 0.5,                                                        # selection effect of Z (large)
-  aU_vals = seq(0, 1, by = 0.2),                                   # vector of effect of U on selection
-  R = 1000,                                                        # number of replications
-  boot_B = 50,                                                     # number of bootstrap draws
+  aX = 0.3,                                                        # selection effect of X (mild selection   - OR=1.35)
+  aY = 0.5,                                                        # selection effect of Y (medium selection - OR=1.65)
+  aZ = 0.8,                                                        # selection effect of Z (strong selection - OR=2.23)
+  aU_vals = seq(0, 2, by = 0.1),                                   # vector of effect of U on selection
+  R = 100,                                                         # number of replications
+  boot_B = 50,                                                    # number of bootstrap draws
   base_seed = 1L,                                                  # seed for reproducibility
   show_progress = TRUE,                                            # show progress bar
   n_cores = 7                                                      # parallel workers (NULL = detectCores()-1)
@@ -145,17 +145,29 @@ save(out_U_040, file = here("03_output", "out_U_040.RData"))
 source(here("01_scripts", "05_plotting.R"))
 
 # 3a. U-confounding = 0.05
-plot_bias_curves(out_U_005, main = "Bias vs aU (U-confounding = 0.05)")
-plot_rmse_curves(out_U_005, main = "RMSE vs aU (U-confounding = 0.05)")
+p1 <- plot_bias_curves(out_U_005, main = "Bias vs aU (U-confounding = 0.05)")
+p2 <- plot_rmse_curves(out_U_005, main = "RMSE vs aU (U-confounding = 0.05)")
 
 # 3b. U-confounding = 0.1
-plot_bias_curves(out_U_010, main = "Bias vs aU (U-confounding = 0.1)")
-plot_rmse_curves(out_U_010, main = "RMSE vs aU (U-confounding = 0.1)")
+p3 <- plot_bias_curves(out_U_010, main = "Bias vs aU (U-confounding = 0.1)")
+p4 <- plot_rmse_curves(out_U_010, main = "RMSE vs aU (U-confounding = 0.1)")
 
 # 3c. U-confounding = 0.2
-plot_bias_curves(out_U_020, main = "Bias vs aU (U-confounding = 0.2)")
-plot_rmse_curves(out_U_020, main = "RMSE vs aU (U-confounding = 0.2)")
+p5 <- plot_bias_curves(out_U_020, main = "Bias vs aU (U-confounding = 0.2)")
+p6 <- plot_rmse_curves(out_U_020, main = "RMSE vs aU (U-confounding = 0.2)")
 
 # 3d. U-confounding = 0.4
-plot_bias_curves(out_U_040, main = "Bias vs aU (U-confounding = 0.4)")
-plot_rmse_curves(out_U_040, main = "RMSE vs aU (U-confounding = 0.4)")
+p7 <- plot_bias_curves(out_U_040, main = "Bias vs aU (U-confounding = 0.4)")
+p8 <- plot_rmse_curves(out_U_040, main = "RMSE vs aU (U-confounding = 0.4)")
+
+# saving the plots
+ggsave(filename = here("03_output", "bias_curves_U_005.png"), plot = p1)
+ggsave(filename = here("03_output", "rmse_curves_U_005.png"), plot = p2)
+ggsave(filename = here("03_output", "bias_curves_U_010.png"), plot = p3)
+ggsave(filename = here("03_output", "rmse_curves_U_010.png"), plot = p4)
+ggsave(filename = here("03_output", "bias_curves_U_020.png"), plot = p5)
+ggsave(filename = here("03_output", "rmse_curves_U_020.png"), plot = p6)
+ggsave(filename = here("03_output", "bias_curves_U_040.png"), plot = p7)
+ggsave(filename = here("03_output", "rmse_curves_U_040.png"), plot = p8)
+
+

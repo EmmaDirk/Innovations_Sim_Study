@@ -3,9 +3,14 @@
 #
 # Saves BOTH raw estimates (beta_hat, se_hat) AND bias (beta_hat - b1)
 #
+# UPDATED to also save the nonlinear term b6 (coefficient on X2c = X^2 - 1):
+#   - beta_hat_b1, se_hat_b1, bias_b1  (for X)
+#   - beta_hat_b6, se_hat_b6, bias_b6  (for X2c = X^2 - 1)
+#
 # Inputs:
 #   pop_df  : population data frame (must contain Y, X, Z, U)
-#   b1      : true causal effect of X on Y (used to compute bias)
+#   b1      : true linear coefficient on X (used to compute bias for b1)
+#   b6      : true coefficient on (X^2 - 1) (used to compute bias for b6)
 #   n_srs   : SRS sample size
 #   n_nps   : NPS sample size
 #   aX,aY,aZ: fixed selection effects for NPS
@@ -23,7 +28,8 @@
 # -----------------------------------------------------------------
 
 simulation_wrapper <- function(pop_df,                       # population data frame
-                               b1,                           # TRUE effect for bias calc
+                               b1,                           # TRUE linear effect for bias calc
+                               b6,                           # TRUE nonlinear effect for bias calc (X^2 - 1)
                                n_srs,                        # sample size for SRS
                                n_nps,                        # sample sizes for NPS
                                aX,                           # effect of X on selection
@@ -50,6 +56,11 @@ simulation_wrapper <- function(pop_df,                       # population data f
   # b1 must be a single finite number
   if (!is.numeric(b1) || length(b1) != 1 || !is.finite(b1)) {
     stop("b1 must be a single finite numeric value.")
+  }
+
+  # b6 must be a single finite number
+  if (!is.numeric(b6) || length(b6) != 1 || !is.finite(b6)) {
+    stop("b6 must be a single finite numeric value.")
   }
 
   # base_seed must be a single finite number
@@ -117,9 +128,9 @@ simulation_wrapper <- function(pop_df,                       # population data f
   parallel::clusterExport(
     cl,
     varlist = c(
-      "pop_df", "b1", "n_srs", "n_nps", "aX", "aY", "aZ", "aU_vals", "boot_B", "base_seed",
+      "pop_df", "b1", "b6", "n_srs", "n_nps", "aX", "aY", "aZ", "aU_vals", "boot_B", "base_seed",
       "srs", "nps",
-      "analyze_srs", "analyze_nps", "analyze_combined_ipw_bootstrap"
+      "analyze_srs", "analyze_nps", "analyze_two_step"
     ),
     envir = environment()
   )
@@ -156,40 +167,68 @@ simulation_wrapper <- function(pop_df,                       # population data f
     # fit SRS outcome model
     res_srs <- analyze_srs(srs_df)
 
+    # extract b1/b6 pieces if your analyze_* functions return them
+    # (recommended: analyze_* fits Y ~ X + I(X^2 - 1) + ... and returns both coefficients + SEs)
+    b1hat_srs <- if (!is.null(res_srs$beta_X)) res_srs$beta_X else NA_real_
+    se1_srs   <- if (!is.null(res_srs$se_X))   res_srs$se_X   else NA_real_
+    b6hat_srs <- if (!is.null(res_srs$beta_X2c)) res_srs$beta_X2c else NA_real_
+    se6_srs   <- if (!is.null(res_srs$se_X2c))   res_srs$se_X2c   else NA_real_
+
     # store SRS result
     row_srs <- data.frame(
       aU = aU,
       rep = r,
-      method = "SRS: OLS(Y~X+Z)",
-      beta_hat = res_srs$beta_X,
-      se_hat = res_srs$se_X,
-      bias = res_srs$beta_X - b1
+      method = "SRS: OLS(Y~X+I(X^2-1)+Z)",
+      beta_hat_b1 = b1hat_srs,
+      se_hat_b1 = se1_srs,
+      bias_b1 = b1hat_srs - b1,
+      beta_hat_b6 = b6hat_srs,
+      se_hat_b6 = se6_srs,
+      bias_b6 = b6hat_srs - b6
     )
 
     # fit NPS outcome model (includes U)
     res_nps <- analyze_nps(nps_df)
 
+    # extract b1/b6 pieces if your analyze_* functions return them
+    b1hat_nps <- if (!is.null(res_nps$beta_X)) res_nps$beta_X else NA_real_
+    se1_nps   <- if (!is.null(res_nps$se_X))   res_nps$se_X   else NA_real_
+    b6hat_nps <- if (!is.null(res_nps$beta_X2c)) res_nps$beta_X2c else NA_real_
+    se6_nps   <- if (!is.null(res_nps$se_X2c))   res_nps$se_X2c   else NA_real_
+
     # store NPS result
     row_nps <- data.frame(
       aU = aU,
       rep = r,
-      method = "NPS: OLS(Y~X+Z+U)",
-      beta_hat = res_nps$beta_X,
-      se_hat = res_nps$se_X,
-      bias = res_nps$beta_X - b1
+      method = "NPS: OLS(Y~X+I(X^2-1)+Z+U)",
+      beta_hat_b1 = b1hat_nps,
+      se_hat_b1 = se1_nps,
+      bias_b1 = b1hat_nps - b1,
+      beta_hat_b6 = b6hat_nps,
+      se_hat_b6 = se6_nps,
+      bias_b6 = b6hat_nps - b6
     )
 
     # fit combined two-step estimator (bootstrap SE)
-    res_ipw <- analyze_combined_ipw_bootstrap(srs_df, nps_df, B = boot_B, seed = seed_boot)
+    res_ipw <- analyze_two_step(srs_df, nps_df, B = boot_B, seed = seed_boot)
+
+    # extract b1/b6 pieces if your combined function returns them
+    b1hat_ipw <- if (!is.null(res_ipw$beta_X)) res_ipw$beta_X else NA_real_
+    se1_ipw   <- if (!is.null(res_ipw$se_boot_X)) res_ipw$se_boot_X else if (!is.null(res_ipw$se_boot)) res_ipw$se_boot else NA_real_
+    b6hat_ipw <- if (!is.null(res_ipw$beta_X2c)) res_ipw$beta_X2c else NA_real_
+    se6_ipw   <- if (!is.null(res_ipw$se_boot_X2c)) res_ipw$se_boot_X2c else NA_real_
 
     # store combined result
     row_ipw <- data.frame(
       aU = aU,
       rep = r,
       method = "Combined: IPW + U (boot SE)",
-      beta_hat = res_ipw$beta_X,
-      se_hat = res_ipw$se_boot,
-      bias = res_ipw$beta_X - b1
+      beta_hat_b1 = b1hat_ipw,
+      se_hat_b1 = se1_ipw,
+      bias_b1 = b1hat_ipw - b1,
+      beta_hat_b6 = b6hat_ipw,
+      se_hat_b6 = se6_ipw,
+      bias_b6 = b6hat_ipw - b6
     )
 
     # return 3-row data.frame for this task
@@ -221,7 +260,7 @@ simulation_wrapper <- function(pop_df,                       # population data f
   # -----------------------------
 
   summary <- aggregate(
-    cbind(beta_hat, se_hat, bias) ~ aU + method,
+    cbind(beta_hat_b1, se_hat_b1, bias_b1, beta_hat_b6, se_hat_b6, bias_b6) ~ aU + method,
     data = draws,
     FUN = mean,
     na.rm = TRUE
@@ -236,6 +275,7 @@ simulation_wrapper <- function(pop_df,                       # population data f
     draws = draws,
     settings = list(
       b1 = b1,
+      b6 = b6,
       n_srs = n_srs,
       n_nps = n_nps,
       aX = aX, aY = aY, aZ = aZ,

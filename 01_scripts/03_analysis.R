@@ -1,16 +1,25 @@
+# -----------------------------------------------------------------
+# 03_analysis.R
+#
 # this scripts has three analysis functions:
-# 1. Analyse the SRS using a linear regression of Y on X and Z. 
+# 1. Analyse the SRS using a linear regression of Y on X and Z.
 # 2. Analyse the NPS using a linear regression of Y on X, Z, and U.
 # 3. Analyse the combined sample using a two step approach:
-#     3a. Fit a logistic regression of S on X, Z to estimate the selection model.
-#     3b. Fit a weighted linear regression of Y on X and Z, 
-#         using inverse probability weights from the estimated selection model.
+#     3a. Fit a logistic regression of S on X, Z, and Y to estimate the selection model.
+#     3b. Fit a weighted linear regression of Y on X, Z, and U,
+#         using inverse odds weights from the estimated selection model.
 #
-# Since we use two models to estimate the effect in the two step approach, we need to 
+# Since we use two models to estimate the effect in the two step approach, we need to
 # correct for the uncertainty in the first step when we compute standard errors for the second step.
-# As such we will do the first step multiple times on different random draws from the 
+# As such we will do the first step multiple times on different random draws from the
 # combined sample, and then compute the standard error as the standard deviation of the estimates.
-# ------------------------------------------------------------------------------
+#
+# IMPORTANT:
+# - Function names are kept EXACTLY as in your current engine:
+#   analyze_srs(), analyze_nps(), analyze_combined_ipw_bootstrap()
+# - The combined weights are inverse-odds: (1 - p_hat)/p_hat
+# - Small numeric guards + optional trimming are included for stability.
+# -----------------------------------------------------------------
 
 # 1. analyse the SRS using a linear regression of Y on X and Z.
 analyze_srs <- function(srs_df) {
@@ -64,131 +73,166 @@ analyze_nps <- function(nps_df) {
   )
 }
 
-# 3. analyse the combined sample using a two step approach
-analyze_combined_ipw_bootstrap <- function(srs_df,                      # data frame of SRS
-                                          nps_df,                       # data frame of NPS
-                                          B = 500,                      # number of bootstrap samples
-                                          seed = NULL) {
+# 3. Analyze the combined sample using a two step approach:
+#     3a. Fit a model to estimate the selection model, S on X, Z, and Y.
+#     3b. Fit a weighted linear regression of Y on X, Z, and U,
+#         to estimate the effect of X on Y. 
+# combine SRS and NPS using inverse-odds weights
+# and compute bootstrap standard errors for beta_X
+analyze_two_step <- function(srs_df,                     # dataframe for SRS
+                             nps_df,                     # dataframe for NPS
+                             B = 500,                    # number of bootstrap replications
+                             ps_formula = ~ X + Z + Y,   # propensity score formula
+                             trim_ps = c(0.01, 0.99),    # trim extreme p-hats for stability
+                             trim_w  = c(0.01, 0.99),    # optional weight trimming by quantiles
+                             stabilize = TRUE,
+                             seed = NULL) {
 
   # if no seed is provided, set the seed
   if (!is.null(seed)) set.seed(seed)
 
-  # checks for selection model (needs X and Z in both samples)
-  need_sel <- c("X", "Z")
-  for (v in need_sel) {
-    if (!(v %in% names(srs_df))) stop(paste("SRS missing:", v))
-    if (!(v %in% names(nps_df))) stop(paste("NPS missing:", v))
-  }
+  # checks
+  # outcome model vars must exist in NPS
+  need_nps <- c("Y","X","Z","U")
 
-  # checks for outcome model (needs Y, X, Z, U in NPS)
-  need_out <- c("Y", "X", "Z", "U")
-  for (v in need_out) {
-    if (!(v %in% names(nps_df))) stop(paste("NPS missing:", v))
-  }
+  # missing variables if any
+  miss_nps <- setdiff(need_nps, names(nps_df))
 
-  # stack the data, create the selection variable
-  # (note: we only need X and Z for the selection model; Y is not needed in SRS)
-  srs_df$S <- 0
-  nps_df$S <- 1
-  comb <- rbind(
-    srs_df[, c("X", "Z", "S")],
-    nps_df[, c("X", "Z", "S")]
-  )
+  # if any missing, stop
+  if (length(miss_nps) > 0) stop(paste("NPS missing:", paste(miss_nps, collapse=", ")))
 
-  # total sample sizes
+  # propensity vars must exist in BOTH
+  ps_vars <- all.vars(ps_formula)
+
+  # missing variables if any
+  miss_srs <- setdiff(ps_vars, names(srs_df))
+  miss_nps2 <- setdiff(ps_vars, names(nps_df))
+
+  # if any missing, stop
+  if (length(miss_srs) > 0) stop(paste("SRS missing (for ps_formula):", paste(miss_srs, collapse=", ")))
+  if (length(miss_nps2) > 0) stop(paste("NPS missing (for ps_formula):", paste(miss_nps2, collapse=", ")))
+
+  # store sample sizes
   n_srs <- nrow(srs_df)
   n_nps <- nrow(nps_df)
 
-  # fit the two step model
-  two_step_fit <- function(srs_d, nps_d) {
+  # container for bootstrap estimates
+  beta_vec <- numeric(B)
 
-    # add selection indicator (in case bootstrap removed it / for safety)
-    srs_d$S <- 0
-    nps_d$S <- 1
-
-    # stack the data for the selection model (needs only X, Z, S)
-    d_sel <- rbind(
-      srs_d[, c("X", "Z", "S")],
-      nps_d[, c("X", "Z", "S")]
-    )
-
-    # 1) selection model to predict S from X and Z (U is unobserved in SRS)
-    sel_fit <- glm(S ~ X + Z, data = d_sel, family = binomial())
-
-    # 2) predicted probabilities of selection for NPS units
-    p_hat_nps <- as.numeric(predict(sel_fit, newdata = nps_d, type = "response"))
-
-    # avoid exactly 0 or 1 probabilities (prevents infinite weights)
-    eps <- 1e-6
-    p_hat_nps <- pmin(pmax(p_hat_nps, eps), 1 - eps)
-
-    # IPW weights for NPS: weight = 1 / p_hat
-    w_nps <- 1 / p_hat_nps
-
-    # 3) weighted outcome model on NPS 
-    out_fit <- lm(Y ~ X + Z + U, data = nps_d, weights = w_nps)
-    sm <- summary(out_fit)$coefficients
-
-    # save beta_X and se_X
-    # note that these are naive SEs that ignore the uncertainty in the selection model, 
-    # which is why we will do the bootstrap to get corrected SEs
-    list(
-      beta_X = unname(sm["X", "Estimate"]),
-      se_naive = unname(sm["X", "Std. Error"]), 
-      selection_model = sel_fit,
-      outcome_model = out_fit
-    )
-  }
-
-  # get the point estimate once 
-  point <- two_step_fit(srs_df, nps_df)
-
-  # save the point estimate
-  beta_hat <- point$beta_X
-
-  # get the bootstrap SEs
-  beta_boot <- numeric(B)
-
-  # for b in the number of bootstrap samples
+  # bootstrap loop
   for (b in seq_len(B)) {
 
-    # bootstrap within each sample (keeps the two-sample structure intact)
-    srs_b <- srs_df[sample.int(n_srs, size = n_srs, replace = TRUE), , drop = FALSE]
-    nps_b <- nps_df[sample.int(n_nps, size = n_nps, replace = TRUE), , drop = FALSE]
+    # resample SRS with replacement
+    idx_srs <- sample.int(n_srs, size = n_srs, replace = TRUE)
+    srs_b <- srs_df[idx_srs, , drop = FALSE]
 
-    # If bootstrap draw has only one class of S in the stacked data, glm can't run -> mark NA
-    # (rare, but possible if one sample size is tiny)
-    d_sel_b <- rbind(
-      transform(srs_b[, c("X", "Z")], S = 0),
-      transform(nps_b[, c("X", "Z")], S = 1)
+    # resample NPS with replacement
+    idx_nps <- sample.int(n_nps, size = n_nps, replace = TRUE)
+    nps_b <- nps_df[idx_nps, , drop = FALSE]
+
+    # stack data for sample-membership model
+    srs_ps <- srs_b[, ps_vars, drop = FALSE]
+    nps_ps <- nps_b[, ps_vars, drop = FALSE]
+
+    comb <- rbind(
+      data.frame(srs_ps, source_nps = 0L),
+      data.frame(nps_ps, source_nps = 1L)
     )
 
-    if (length(unique(d_sel_b$S)) < 2) {
-      beta_boot[b] <- NA_real_
-    } else {
-      beta_boot[b] <- tryCatch(two_step_fit(srs_b, nps_b)$beta_X, error = function(e) NA_real_)
+    # fit propensity model: P(source = NPS | shared vars)
+    ps_fit <- glm(update(ps_formula, source_nps ~ .),
+                  data = comb, family = binomial())
+
+    # predict P(source = NPS | shared vars) for NPS bootstrap sample
+    p_hat <- predict(ps_fit, newdata = nps_ps, type = "response")
+
+    # trim p-hat away from 0/1
+    p_lo <- trim_ps[1]; p_hi <- trim_ps[2]
+    p_hat <- pmin(pmax(p_hat, p_lo), p_hi)
+
+    # inverse-odds weights
+    w <- (1 - p_hat) / p_hat
+
+    # stabilize (keeps mean weight ~ 1-ish)
+    if (stabilize) {
+      pi_nps <- mean(comb$source_nps == 1L)
+      pi_srs <- 1 - pi_nps
+      w <- w * (pi_nps / pi_srs)
     }
+
+    # optional trimming of extreme weights
+    if (!is.null(trim_w)) {
+      q <- quantile(w, probs = trim_w, na.rm = TRUE)
+      w <- pmin(pmax(w, q[1]), q[2])
+    }
+
+    # normalize weights to sum to NPS sample size
+    w <- w * (n_nps / sum(w))
+
+    # weighted outcome model on bootstrap NPS
+    fit_w <- lm(Y ~ X + Z + U, data = nps_b, weights = w)
+
+    # store bootstrap estimate of beta_X
+    beta_vec[b] <- coef(fit_w)["X"]
   }
 
-  # if any bootstrap estimates are NA or infinite, we remove them before computing SE and CI
-  beta_boot_ok <- beta_boot[is.finite(beta_boot)]
-
-  # compute bootstrap SE as the standard deviation of the bootstrap estimates
-  se_boot <- sd(beta_boot_ok)
-
-  # compute percentile 95% CI
-  ci_95 <- as.numeric(quantile(beta_boot_ok, probs = c(0.025, 0.975), na.rm = TRUE))
-
-  # keep the results
+  # return bootstrap mean and bootstrap SE
   list(
-    beta_X = beta_hat,              # 2-step point estimate
-    se_boot = se_boot,              # bootstrap SE (accounts for 2-step uncertainty)
-    ci_95 = ci_95,                  # percentile 95% CI
-    se_naive = point$se_naive,      # naive SE from weighted lm only (ignores step 1)
-    B = B,
-    n_boot_ok = length(beta_boot_ok),
-    beta_boot = beta_boot_ok,
-    selection_model = point$selection_model,
-    outcome_model = point$outcome_model
+    beta_X = mean(beta_vec),         # bootstrap mean estimate
+    se_X   = sd(beta_vec),           # bootstrap standard error
+    boot_dist = beta_vec             # full bootstrap distribution
   )
 }
+
+# checks
+# generate data
+df_pop <- simulate_pop_data(
+  N  = 100000,
+  b1 = 0.3,  
+  b2 = 0.3,
+  b3 = 0,
+  b4 = 0.4,
+  b5 = 0.4
+)
+
+# check if parameters are recoverable under the correct model
+true_fit <- lm(Y ~ X + Z + U, data = df_pop)
+true_b1  <- coef(true_fit)["X"]
+cat("True b1 (population):", true_b1, "\n\n")
+
+# draw samples
+srs_df <- srs(df_pop, n = 1000, seed = 1)
+nps_df <- nps(
+  df_pop,
+  n  = 1000,
+  aX = 0.8,
+  aY = 0.9,
+  aZ = 0.7,
+  aU = 0.1,
+  seed = 2
+)
+
+# analyze SRS: we expect bias
+res_srs <- analyze_srs(srs_df)
+cat("SRS results\n")
+cat("beta_X:", res_srs$beta_X, "\n")
+cat("se_X  :", res_srs$se_X, "\n\n")
+
+# analyze NPS: we expect bias
+res_nps <- analyze_nps(nps_df)
+cat("NPS results\n")
+cat("beta_X:", res_nps$beta_X, "\n")
+cat("se_X  :", res_nps$se_X, "\n\n")
+
+# analyze two-setp: we expect less bias
+res_two <- analyze_two_step(
+  srs_df,
+  nps_df,
+  B = 300,   
+  ps_formula = ~ X + Z + Y,
+  seed = 3
+)
+
+cat("Two-step IPW results\n")
+cat("beta_X:", res_two$beta_X, "\n")
+cat("se_X  :", res_two$se_X, "\n\n")

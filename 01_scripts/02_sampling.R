@@ -62,26 +62,4 @@ nps <- function(df,                       # data frame (population)
   return(out)
 }
 
-# checks 
-# first simulate data
-# df <- simulate_pop_data(N = 100000, 
-#                  b1 = 0.15, 
-#                  b2 = 0.15, 
-#                  b3 = 0.15,
-#                  b4 = 0.15, 
-#                  b5 = 0.15)
 
-# sample with the functions
-# df_srs <- srs(df, n = 1000)
-# df_nps <- nps(df, 
-#              n = 1000,
-#              aX = 0.15, 
-#              aY = 0.15, 
-#              aZ = 0.15, 
-#              aU = 0.15)
-
-# check that the linear model on the SRS is biased because U is omitted
-# lm(Y ~ X + Z, data = df_srs)
-
-# check that the linear model on the NPS is biased because selection
-# lm(Y ~ X + Z + U, data = df_nps)

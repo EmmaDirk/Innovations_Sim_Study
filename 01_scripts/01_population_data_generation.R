@@ -92,30 +92,3 @@ simulate_pop_data <- function(N,              # sample size
   # step 6: return the simulated data
   return(out)
 }
-
-# example use
-# set.seed(123)
-# df <- simulate_pop_data(N = 100000,
-# b1 = 0.15,
-# b2 = 0.15,
-# b3 = 0.15,
-# b4 = 0.15,
-# b5 = 0.15,
-# b6 = 0.10)
-
-# checking data
-# var=1, and covariances
-# cov(df[, c("Z","U","X","Y")])
-
-# check if parameters are recoverable under the correct model
-# b1 = 0.15, b3 = 0.15, b4 = 0.15, b6 = 0.10, so we expect to recover these values when regressing
-# Y on X, I(X^2 - 1), Z, and U
-# my <- lm(Y ~ X + I(X^2 - 1) + Z + U, data = df)
-# coef(my)
-
-# check if parameters are recoverable under the correct model
-# b2 = 0.15, b5 = 0.15, so we expect to recover these values when regressing X on Z and U
-# mX <- lm(X ~ Z + U, data = df)
-# coef(mX)
-
-

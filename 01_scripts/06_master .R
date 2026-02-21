@@ -22,7 +22,8 @@ df_U_005 <- simulate_pop_data(N = 1000000,                   # population of 1M
                               b2 = 0.15,                     # effect of Z -> X
                               b3 = 0.15,                     # effect of Z -> Y
                               b4 = 0.05,                     # effect of U -> Y
-                              b5 = 0.05)                     # effect of U -> X
+                              b5 = 0.05,                     # effect of U -> X
+                              b6 = 0.1)                        # curvature term for X^2 -> Y
   
 # 1b. population where U has an effect of 0.1 on X and Y
 df_U_010 <- simulate_pop_data(N = 1000000,                   # population of 1M
@@ -30,7 +31,8 @@ df_U_010 <- simulate_pop_data(N = 1000000,                   # population of 1M
                               b2 = 0.15,                     # effect of Z -> X
                               b3 = 0.15,                     # effect of Z -> Y
                               b4 = 0.1,                      # effect of U -> Y
-                              b5 = 0.1)                      # effect of U -> X
+                              b5 = 0.1,                      # effect of U -> X
+                              b6 = 0.1)                      # curvature term for X^2 -> Y
 
 # 1c. population where U has an effect of 0.2 on X and Y
 df_U_020 <- simulate_pop_data(N = 1000000,                   # population of 1M
@@ -38,7 +40,8 @@ df_U_020 <- simulate_pop_data(N = 1000000,                   # population of 1M
                               b2 = 0.15,                     # effect of Z -> X
                               b3 = 0.15,                     # effect of Z -> Y
                               b4 = 0.2,                      # effect of U -> Y
-                              b5 = 0.2)                      # effect of U -> X
+                              b5 = 0.2,                      # effect of U -> X
+                              b6 = 0.1)                      # curvature term for X^2 -> Y
 
 # 1d. population where U has an effect of 0.4 on X and Y
 df_U_040 <- simulate_pop_data(N = 1000000,                   # population of 1M
@@ -46,7 +49,8 @@ df_U_040 <- simulate_pop_data(N = 1000000,                   # population of 1M
                               b2 = 0.15,                     # effect of Z -> X
                               b3 = 0.15,                     # effect of Z -> Y
                               b4 = 0.4,                      # effect of U -> Y
-                              b5 = 0.4)                      # effect of U -> X
+                              b5 = 0.4,                      # effect of U -> X
+                              b6 = 0.1)                      # curvature term for X^2 -> Y
 
 # save the dataframes in the data folder
 save(df_U_005, file = here("02_data", "df_U_005.RData"))
@@ -71,8 +75,8 @@ out_U_005 <- simulation_wrapper(
   aY = 0.5,                                                        # selection effect of Y (medium selection - OR=1.65)
   aZ = 0.8,                                                        # selection effect of Z (strong selection - OR=2.23)
   aU_vals = seq(0, 2, by = 0.1),                                   # vector of effect of U on selection
-  R = 100,                                                         # number of replications
-  boot_B = 50,                                                    # number of bootstrap draws
+  R = 1000,                                                        # number of replications
+  boot_B = 100,                                                    # number of bootstrap draws
   base_seed = 1L,                                                  # seed for reproducibility
   show_progress = TRUE,                                            # show progress bar
   n_cores = 7                                                      # parallel workers (NULL = detectCores()-1)

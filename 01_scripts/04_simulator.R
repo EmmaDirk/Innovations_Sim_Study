@@ -188,7 +188,7 @@ simulation_wrapper <- function(pop_df,                       # population data f
       rep = r,
       method = "Combined: IPW + U (boot SE)",
       beta_hat = res_ipw$beta_X,
-      se_hat = res_ipw$se_boot,
+      se_hat = res_ipw$se_X,
       bias = res_ipw$beta_X - b1
     )
 

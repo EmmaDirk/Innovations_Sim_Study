@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------
-# Plotting functions for simulation_wrapper() output
+# Plotting functions for simulation_wrapper() output (ggplot2 version)
 #
 # Expected input:
 #   out <- simulation_wrapper(...)
@@ -14,7 +14,7 @@
 #        which equals sqrt( mean( bias^2 ) )
 #
 # Notes:
-#   - Uses base R only (no ggplot).
+#   - Uses ggplot2 (returns ggplot objects so ggsave() works).
 #   - One plot per call (you’ll call it 4 times for your 4 populations).
 # -----------------------------------------------------------------
 
@@ -57,7 +57,7 @@ plot_bias_curves <- function(sim_out,
                              main = "Bias vs aU",
                              xlab = "aU (effect of U on selection)",
                              ylab = "Bias (beta_hat - b1)",
-                             lwd = 2) {
+                             lwd = 1) {
 
   # checks
   if (is.null(sim_out$summary)) stop("sim_out must contain $summary.")
@@ -72,39 +72,26 @@ plot_bias_curves <- function(sim_out,
   miss <- setdiff(need, names(s))
   if (length(miss) > 0) stop(paste("summary missing:", paste(miss, collapse = ", ")))
 
-  # order x values
-  aU_vals <- sort(unique(s$aU))
-  methods <- unique(s$method)
+  # ensure method is treated as a discrete series
+  s$method <- factor(s$method)
 
-  # choose colours (one per method)
-  cols <- grDevices::hcl.colors(length(methods), palette = "Dark 3")
-  names(cols) <- methods
+  # build plot
+  ggplot2::ggplot(s, ggplot2::aes(x = aU, y = bias, color = method)) +
 
-  # y-range over all methods
-  ylim <- range(s$bias, finite = TRUE)
+    # add horizontal zero line
+    ggplot2::geom_hline(yintercept = 0, linetype = 2) +
 
-  # set up empty plot
-  plot(aU_vals, rep(NA_real_, length(aU_vals)),
-       type = "n", main = main, xlab = xlab, ylab = ylab, ylim = ylim)
+    # draw one line per method
+    ggplot2::geom_line(linewidth = lwd) +
 
-  # add horizontal zero line
-  abline(h = 0, lty = 2)
+    # (optional) show points at each aU
+    ggplot2::geom_point(size = 2) +
 
-  # draw one line per method
-  for (m in methods) {
+    # labels
+    ggplot2::labs(title = main, x = xlab, y = ylab, color = "Method") +
 
-    # subset
-    sm <- s[s$method == m, ]
-
-    # order
-    sm <- sm[order(sm$aU), ]
-
-    # draw
-    lines(sm$aU, sm$bias, lwd = lwd, col = cols[m])
-  }
-
-  # legend with matching colours
-  legend("topright", legend = methods, lwd = lwd, col = cols, bty = "n")
+    # clean theme
+    ggplot2::theme_minimal()
 }
 
 
@@ -113,38 +100,26 @@ plot_rmse_curves <- function(sim_out,
                              main = "RMSE vs aU",
                              xlab = "aU (effect of U on selection)",
                              ylab = "RMSE",
-                             lwd = 2) {
+                             lwd = 1) {
 
+  # compute RMSE table
   rmse_df <- compute_rmse_summary(sim_out)
 
-  # order x values
-  aU_vals <- sort(unique(rmse_df$aU))
-  methods <- unique(rmse_df$method)
+  # ensure method is treated as a discrete series
+  rmse_df$method <- factor(rmse_df$method)
 
-  # choose colours (one per method)
-  cols <- grDevices::hcl.colors(length(methods), palette = "Dark 3")
-  names(cols) <- methods
+  # build plot
+  ggplot2::ggplot(rmse_df, ggplot2::aes(x = aU, y = rmse, color = method)) +
 
-  # y-range
-  ylim <- range(rmse_df$rmse, finite = TRUE)
+    # draw one line per method
+    ggplot2::geom_line(linewidth = lwd) +
 
-  # set up empty plot
-  plot(aU_vals, rep(NA_real_, length(aU_vals)),
-       type = "n", main = main, xlab = xlab, ylab = ylab, ylim = ylim)
+    # (optional) show points at each aU
+    ggplot2::geom_point(size = 2) +
 
-  # draw one line per method
-  for (m in methods) {
+    # labels
+    ggplot2::labs(title = main, x = xlab, y = ylab, color = "Method") +
 
-    # subset
-    dm <- rmse_df[rmse_df$method == m, ]
-
-    # order
-    dm <- dm[order(dm$aU), ]
-
-    # draw
-    lines(dm$aU, dm$rmse, lwd = lwd, col = cols[m])
-  }
-
-  # legend with matching colours
-  legend("topright", legend = methods, lwd = lwd, col = cols, bty = "n")
+    # clean theme
+    ggplot2::theme_minimal()
 }

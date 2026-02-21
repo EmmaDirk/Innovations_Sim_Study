@@ -165,13 +165,18 @@ p7 <- plot_bias_curves(out_U_040, main = "Bias vs aU (U-confounding = 0.4)")
 p8 <- plot_rmse_curves(out_U_040, main = "RMSE vs aU (U-confounding = 0.4)")
 
 # saving the plots
-ggsave(filename = here("03_output", "bias_curves_U_005.png"), plot = p1)
-ggsave(filename = here("03_output", "rmse_curves_U_005.png"), plot = p2)
-ggsave(filename = here("03_output", "bias_curves_U_010.png"), plot = p3)
-ggsave(filename = here("03_output", "rmse_curves_U_010.png"), plot = p4)
-ggsave(filename = here("03_output", "bias_curves_U_020.png"), plot = p5)
-ggsave(filename = here("03_output", "rmse_curves_U_020.png"), plot = p6)
-ggsave(filename = here("03_output", "bias_curves_U_040.png"), plot = p7)
-ggsave(filename = here("03_output", "rmse_curves_U_040.png"), plot = p8)
+ggsave(here("03_output", "p1_bias_U005.png"), plot = p1, width = 7, height = 5, dpi = 300)
+ggsave(here("03_output", "p2_rmse_U005.png"), plot = p2, width = 7, height = 5, dpi = 300)
+
+ggsave(here("03_output", "p3_bias_U010.png"), plot = p3, width = 7, height = 5, dpi = 300)
+ggsave(here("03_output", "p4_rmse_U010.png"), plot = p4, width = 7, height = 5, dpi = 300)
+
+ggsave(here("03_output", "p5_bias_U020.png"), plot = p5, width = 7, height = 5, dpi = 300)
+ggsave(here("03_output", "p6_rmse_U020.png"), plot = p6, width = 7, height = 5, dpi = 300)
+
+ggsave(here("03_output", "p7_bias_U040.png"), plot = p7, width = 7, height = 5, dpi = 300)
+ggsave(here("03_output", "p8_rmse_U040.png"), plot = p8, width = 7, height = 5, dpi = 300)
+
+
 
 

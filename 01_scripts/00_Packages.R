@@ -2,7 +2,8 @@
 # -----------------------------------------------------------------
 
 # required packages
-pkgs <- c("tidyverse", "sampling")
+pkgs <- c("tidyverse", "sampling", "viridis",
+          "patchwork")
 
 # load packages
 lapply(pkgs, library, character.only = TRUE)

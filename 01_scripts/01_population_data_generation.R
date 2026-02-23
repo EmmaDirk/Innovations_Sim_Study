@@ -2,12 +2,12 @@
 # -----------------------------------------------------------------
 
 simulate_pop_data <- function(N,              # sample size
-                              b1,             # X -> Y  (linear part)
+                              b1,             # X -> Y  (main effect; equals average effect since E[Z]=0)
                               b2,             # Z -> X
                               b3,             # Z -> Y
                               b4,             # U -> Y
                               b5,             # U -> X
-                              b6 = 0,         # NEW: curvature term for X^2 -> Y (heterogeneous effect over X)
+                              b6,         # NEW: interaction term for X*Z -> Y (effect modification by Z)
                               seed = NULL) {
 
   # mean-0 Normal variables with Var(Z)=Var(U)=Var(X)=Var(Y)=1 (population).
@@ -16,20 +16,24 @@ simulate_pop_data <- function(N,              # sample size
   # Z ~ N(0,1), U ~ N(0,1), independent
   # X = b2*Z + b5*U + e_x,  Var(e_x)=1-(b2^2+b5^2)
   #
-  # UPDATED Y to allow effect of X to vary over the range of X (nonlinear marginal effect):
-  # Y = b1*X + b6*(X^2 - 1) + b3*Z + b4*U + e_y
+  # UPDATED Y to allow the effect of X to vary over Z (interaction / effect modification):
+  # Y = b1*X + b6*(X*Z - b2) + b3*Z + b4*U + e_y
   #
   # Notes:
-  # - (X^2 - 1) is a centered quadratic term (since E[X^2]=1 when Var(X)=1), so it has mean 0 in population.
-  # - The marginal effect is dY/dX = b1 + 2*b6*X, so it changes with X.
+  # - (X*Z - b2) is a centered interaction term since E[XZ]=Cov(X,Z)=b2 under this DGM,
+  #   so it has mean 0 in population.
+  # - The conditional marginal effect is dY/dX = b1 + b6*Z, so it changes with Z.
+  # - The average marginal effect over Z is E[dY/dX] = b1 because E[Z]=0, so b1 captures
+  #   the true average effect of X on Y.
   #
   # Var(e_y)= 1 - ( b1^2 + b3^2 + b4^2
   #                + 2*b1*b3*b2
   #                + 2*b1*b4*b5
-  #                + 2*b6^2 )
+  #                + b6^2*(1 + b2^2) )
   #
-  # The extra "+ 2*b6^2" comes from Var(X^2 - 1) = 2 (for mean-0 Var-1 normal X),
-  # and cross-covariances with X, Z, U are 0 under this normal DGM.
+  # The extra "+ b6^2*(1 + b2^2)" comes from Var(X*Z - b2) = Var(XZ) = 1 + b2^2
+  # (for mean-0 Var-1 jointly normal X and Z with Cov(X,Z)=b2),
+  # and cross-covariances with X, Z, U are 0 under this normal DGM because we center the interaction.
 
   if (!is.null(seed)) set.seed(seed)
 
@@ -57,12 +61,14 @@ simulate_pop_data <- function(N,              # sample size
   # step 3: simulate endogenous variable Y
   # first we need to compute how much variance is left for e_y given b1, b3, b4, b2, and b5
   #
-  # NEW: add centered quadratic term (X^2 - 1) so the effect of X varies over X
-  # (marginal effect dY/dX = b1 + 2*b6*X)
-  X2c <- X^2 - 1
+  # NEW: add centered interaction term (X*Z - b2) so the effect of X varies over Z
+  # (conditional marginal effect dY/dX = b1 + b6*Z; average marginal effect = b1)
+  XZc <- X * Z - b2
 
-  sys_var_y <- b1^2 + b3^2 + b4^2 + 2 * b1 * b3 * b2 + 2 * b1 * b4 * b5 +
-    2 * b6^2
+  sys_var_y <- b1^2 + b3^2 + b4^2 +
+    2 * b1 * b3 * b2 +
+    2 * b1 * b4 * b5 +
+    b6^2 * (1 + b2^2)
 
   # var(e_y) = sigma2_y
   sy2 <- 1 - sys_var_y
@@ -77,7 +83,7 @@ simulate_pop_data <- function(N,              # sample size
   ey <- rnorm(N, mean = 0, sd = sqrt(sy2))
 
   # simulate Y from the DGM
-  Y <- b1 * X + b6 * X2c + b3 * Z + b4 * U + ey
+  Y <- b1 * X + b6 * XZc + b3 * Z + b4 * U + ey
 
   # step 4: combine into a data frame
   out <- data.frame(Z = Z, U = U, X = X, Y = Y)

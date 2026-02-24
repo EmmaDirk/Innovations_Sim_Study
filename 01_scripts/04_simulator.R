@@ -1,3 +1,4 @@
+# 04_simulator.R
 # -----------------------------------------------------------------
 # Simulation function: bias curves vs aU for 3 approaches
 #
@@ -7,7 +8,9 @@
 #   pop_df  : population data frame (must contain Y, X, Z, U)
 #   b1      : true causal effect of X on Y (used to compute bias)
 #   n_srs   : SRS sample size
-#   n_nps   : NPS sample size
+#   n_nps   : NPS sample size(s). if you pass a vector of length 2,
+#             we run the small NPS and the big data NPS in parallel
+#             and return 5 methods (SRS, NPS small, NPS big, Combined small, Combined big)
 #   aX,aY,aZ: fixed selection effects for NPS
 #   aU_vals : vector of effect of U on selection
 #   R       : number of Monte Carlo replications per aU value
@@ -25,7 +28,7 @@
 simulation_wrapper <- function(pop_df,                       # population data frame
                                b1,                           # TRUE effect for bias calc
                                n_srs,                        # sample size for SRS
-                               n_nps,                        # sample sizes for NPS
+                               n_nps,                        # sample size(s) for NPS
                                aX,                           # effect of X on selection
                                aY,                           # effect of Y on selection
                                aZ,                           # effect of Z on selection
@@ -51,6 +54,19 @@ simulation_wrapper <- function(pop_df,                       # population data f
   if (!is.numeric(b1) || length(b1) != 1 || !is.finite(b1)) {
     stop("b1 must be a single finite numeric value.")
   }
+
+  # allow either a single NPS size (backwards compatible) or 2 sizes (small + big data)
+  if (!is.numeric(n_nps) || length(n_nps) < 1 || length(n_nps) > 2) {
+    stop("n_nps must be a numeric vector of length 1 or 2.")
+  }
+
+  # clean up NPS sizes
+  n_nps <- as.integer(n_nps)
+  if (any(!is.finite(n_nps)) || any(n_nps < 2L)) stop("n_nps values must be finite integers >= 2.")
+
+  # define the two NPS sizes if provided
+  n_nps_small <- n_nps[1]
+  n_nps_big   <- if (length(n_nps) == 2) n_nps[2] else NA_integer_
 
   # base_seed must be a single finite number
   if (!is.numeric(base_seed) || length(base_seed) != 1 || !is.finite(base_seed)) {
@@ -117,7 +133,7 @@ simulation_wrapper <- function(pop_df,                       # population data f
   parallel::clusterExport(
     cl,
     varlist = c(
-      "pop_df", "b1", "n_srs", "n_nps", "aX", "aY", "aZ", "aU_vals", "boot_B", "base_seed",
+      "pop_df", "b1", "n_srs", "n_nps_small", "n_nps_big", "aX", "aY", "aZ", "aU_vals", "boot_B", "base_seed",
       "srs", "nps",
       "analyze_srs", "analyze_nps", "analyze_two_step"
     ),
@@ -128,10 +144,17 @@ simulation_wrapper <- function(pop_df,                       # population data f
   # 5) One-task worker function
   # -----------------------------
 
-  # this runs exactly one (aU, rep) combination and returns 3 rows:
+  # this runs exactly one (aU, rep) combination.
+  # if you pass one NPS size, it returns 3 rows:
   #   - SRS estimate
   #   - NPS estimate
   #   - Combined/IPW estimate
+  # if you pass two NPS sizes, it returns 5 rows:
+  #   - SRS estimate
+  #   - NPS (small)
+  #   - NPS (big data)
+  #   - Combined (small)
+  #   - Combined (big data)
   worker_fun <- function(task_row) {
 
     # unpack the task identifiers
@@ -143,15 +166,23 @@ simulation_wrapper <- function(pop_df,                       # population data f
 
     # deterministic seeds per task:
     # ensures identical results regardless of number of cores / scheduling
-    seed_srs  <- base_seed + 100000L * i + 10L * r + 1L
-    seed_nps  <- base_seed + 100000L * i + 10L * r + 2L
-    seed_boot <- base_seed + 100000L * i + 10L * r + 3L
+    seed_srs      <- base_seed + 100000L * i + 10L * r + 1L
+    seed_nps_s    <- base_seed + 100000L * i + 10L * r + 2L
+    seed_boot_s   <- base_seed + 100000L * i + 10L * r + 3L
+    seed_nps_big  <- base_seed + 100000L * i + 10L * r + 4L
+    seed_boot_big <- base_seed + 100000L * i + 10L * r + 5L
 
     # draw the SRS
     srs_df <- srs(pop_df, n = n_srs, seed = seed_srs)
 
-    # draw the NPS with selection parameters (including current aU)
-    nps_df <- nps(pop_df, n = n_nps, aX = aX, aY = aY, aZ = aZ, aU = aU, seed = seed_nps)
+    # draw the NPS (small) with selection parameters (including current aU)
+    nps_df_small <- nps(pop_df, n = n_nps_small, aX = aX, aY = aY, aZ = aZ, aU = aU, seed = seed_nps_s)
+
+    # draw the NPS (big data) if requested
+    do_big <- !is.na(n_nps_big) && is.finite(n_nps_big)
+    if (do_big) {
+      nps_df_big <- nps(pop_df, n = n_nps_big, aX = aX, aY = aY, aZ = aZ, aU = aU, seed = seed_nps_big)
+    }
 
     # fit SRS outcome model
     res_srs <- analyze_srs(srs_df)
@@ -160,40 +191,71 @@ simulation_wrapper <- function(pop_df,                       # population data f
     row_srs <- data.frame(
       aU = aU,
       rep = r,
-      method = "SRS: OLS(Y~X+Z)",
+      method = "SRS",
       beta_hat = res_srs$beta_X,
       se_hat = res_srs$se_X,
       bias = res_srs$beta_X - b1
     )
 
-    # fit NPS outcome model (includes U)
-    res_nps <- analyze_nps(nps_df)
+    # fit NPS outcome model (small; includes U)
+    res_nps_small <- analyze_nps(nps_df_small)
 
-    # store NPS result
-    row_nps <- data.frame(
+    # store NPS result (small)
+    row_nps_small <- data.frame(
       aU = aU,
       rep = r,
-      method = "NPS: OLS(Y~X+Z+U)",
-      beta_hat = res_nps$beta_X,
-      se_hat = res_nps$se_X,
-      bias = res_nps$beta_X - b1
+      method = sprintf("NPS (%s)", n_nps_small),
+      beta_hat = res_nps_small$beta_X,
+      se_hat = res_nps_small$se_X,
+      bias = res_nps_small$beta_X - b1
     )
 
-    # fit combined two-step estimator (bootstrap SE)
-    res_ipw <- analyze_two_step(srs_df, nps_df, B = boot_B, seed = seed_boot)
+    # fit combined two-step estimator (small; bootstrap SE)
+    res_ipw_small <- analyze_two_step(srs_df, nps_df_small, B = boot_B, seed = seed_boot_s)
 
-    # store combined result
-    row_ipw <- data.frame(
+    # store combined result (small)
+    row_ipw_small <- data.frame(
       aU = aU,
       rep = r,
-      method = "Combined: IPW + U (boot SE)",
-      beta_hat = res_ipw$beta_X,
-      se_hat = res_ipw$se_X,
-      bias = res_ipw$beta_X - b1
+      method = sprintf("Combined (%s)", n_nps_small),
+      beta_hat = res_ipw_small$beta_X,
+      se_hat = res_ipw_small$se_X,
+      bias = res_ipw_small$beta_X - b1
     )
 
-    # return 3-row data.frame for this task
-    rbind(row_srs, row_nps, row_ipw)
+    # if no big data NPS, return the 3-row data.frame for this task
+    if (!do_big) {
+      return(rbind(row_srs, row_nps_small, row_ipw_small))
+    }
+
+    # fit NPS outcome model (big data; includes U)
+    res_nps_big <- analyze_nps(nps_df_big)
+
+    # store NPS result (big data)
+    row_nps_big <- data.frame(
+      aU = aU,
+      rep = r,
+      method = sprintf("NPS (%s)", n_nps_big),
+      beta_hat = res_nps_big$beta_X,
+      se_hat = res_nps_big$se_X,
+      bias = res_nps_big$beta_X - b1
+    )
+
+    # fit combined two-step estimator (big data; bootstrap SE)
+    res_ipw_big <- analyze_two_step(srs_df, nps_df_big, B = boot_B, seed = seed_boot_big)
+
+    # store combined result (big data)
+    row_ipw_big <- data.frame(
+      aU = aU,
+      rep = r,
+      method = sprintf("Combined (%s)", n_nps_big),
+      beta_hat = res_ipw_big$beta_X,
+      se_hat = res_ipw_big$se_X,
+      bias = res_ipw_big$beta_X - b1
+    )
+
+    # return 5-row data.frame for this task
+    rbind(row_srs, row_nps_small, row_nps_big, row_ipw_small, row_ipw_big)
   }
 
   # -----------------------------

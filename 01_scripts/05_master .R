@@ -1,3 +1,4 @@
+# 05_master .R
 # this script is used to call all other scripts
 # -----------------------------------------------------------------
 
@@ -67,19 +68,19 @@ source(here("01_scripts", "04_simulator.R"))
 # we will run the analyses on the 4 datasets
 # 2a. 
 out_U_005_int <- simulation_wrapper(
-  pop_df = df_U_005_int,                                               # population data frame
+  pop_df = df_U_005_int,                                           # population data frame
   b1 = 0.1,                                                        # TRUE effect for bias calc
   n_srs = 1000,                                                    # sample size for SRS
-  n_nps = 200,                                                     # sample sizes for NPS
+  n_nps = c(200, 5000),                                            # sample sizes for NPS (small NPS + big data)
   aX = 0.3,                                                        # selection effect of X (mild selection   - OR=1.35)
   aY = 0.5,                                                        # selection effect of Y (medium selection - OR=1.65)
   aZ = 0.8,                                                        # selection effect of Z (strong selection - OR=2.23)
   aU_vals = seq(0, 2, by = 0.1),                                   # vector of effect of U on selection
-  R = 1000,                                                        # number of replications
-  boot_B = 100,                                                    # number of bootstrap draws
+  R = 200,                                                         # number of replications
+  boot_B = 50,                                                     # number of bootstrap draws
   base_seed = 1L,                                                  # seed for reproducibility
   show_progress = TRUE,                                            # show progress bar
-  n_cores = 7                                                      # parallel workers (NULL = detectCores()-1)
+  n_cores = 6                                                      # parallel workers (NULL = detectCores()-1)
 )
 
 # save the results
@@ -87,16 +88,16 @@ save(out_U_005_int, file = here("03_output", "out_U_005_int.RData"))
 
 # 2b.
 out_U_010_int <- simulation_wrapper(
-  pop_df = df_U_010_int,                                               # population data frame
+  pop_df = df_U_010_int,                                           # population data frame
   b1 = 0.1,                                                        # TRUE effect for bias calc
   n_srs = 1000,                                                    # sample size for SRS
-  n_nps = 200,                                                     # sample sizes for NPS
+  n_nps = c(200, 5000),                                            # sample sizes for NPS (small NPS + big data)
   aX = 0.1,                                                        # selection effect of X (small)
   aY = 0.15,                                                       # selection effect of Y (small)
   aZ = 0.5,                                                        # selection effect of Z (large)
   aU_vals = seq(0, 2, by = 0.1),                                   # vector of effect of U on selection
-  R = 1000,                                                        # number of replications
-  boot_B = 100,                                                    # number of bootstrap draws
+  R = 200,                                                         # number of replications
+  boot_B = 50,                                                     # number of bootstrap draws
   base_seed = 1L,                                                  # seed for reproducibility
   show_progress = TRUE,                                            # show progress bar
   n_cores = 7                                                      # parallel workers (NULL = detectCores()-1)
@@ -110,13 +111,13 @@ out_U_020_int <- simulation_wrapper(
   pop_df = df_U_020_int,                                           # population data frame
   b1 = 0.1,                                                        # TRUE effect for bias calc
   n_srs = 1000,                                                    # sample size for SRS
-  n_nps = 200,                                                     # sample sizes for NPS
+  n_nps = c(200, 5000),                                            # sample sizes for NPS (small NPS + big data)
   aX = 0.1,                                                        # selection effect of X (small)
   aY = 0.15,                                                       # selection effect of Y (small)
   aZ = 0.5,                                                        # selection effect of Z (large)
   aU_vals = seq(0, 2, by = 0.1),                                   # vector of effect of U on selection
-  R = 1000,                                                        # number of replications
-  boot_B = 100,                                                    # number of bootstrap draws
+  R = 200,                                                         # number of replications
+  boot_B = 50,                                                     # number of bootstrap draws
   base_seed = 1L,                                                  # seed for reproducibility
   show_progress = TRUE,                                            # show progress bar
   n_cores = 7                                                      # parallel workers (NULL = detectCores()-1)
@@ -127,16 +128,16 @@ save(out_U_020_int, file = here("03_output", "out_U_020_int.RData"))
 
 # 2d.
 out_U_040_int <- simulation_wrapper(
-  pop_df = df_U_040_int,                                               # population data frame
+  pop_df = df_U_040_int,                                           # population data frame
   b1 = 0.1,                                                        # TRUE effect for bias calc
   n_srs = 1000,                                                    # sample size for SRS
-  n_nps = 200,                                                     # sample sizes for NPS
+  n_nps = c(200, 5000),                                            # sample sizes for NPS (small NPS + big data)
   aX = 0.1,                                                        # selection effect of X (small)
   aY = 0.15,                                                       # selection effect of Y (small)
   aZ = 0.5,                                                        # selection effect of Z (large)
   aU_vals = seq(0, 2, by = 0.1),                                   # vector of effect of U on selection
-  R = 1000,                                                        # number of replications
-  boot_B = 100,                                                    # number of bootstrap draws
+  R = 200,                                                         # number of replications
+  boot_B = 50,                                                     # number of bootstrap draws
   base_seed = 1L,                                                  # seed for reproducibility
   show_progress = TRUE,                                            # show progress bar
   n_cores = 7                                                      # parallel workers (NULL = detectCores()-1)
@@ -144,4 +145,3 @@ out_U_040_int <- simulation_wrapper(
 
 # save the results
 save(out_U_040_int, file = here("03_output", "out_U_040_int.RData"))
-

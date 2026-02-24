@@ -1,3 +1,4 @@
+# 07_plots.R
 # -----------------------------------------------------------------
 # Create one combined 2x4 figure from the *_int simulation outputs
 #
@@ -132,7 +133,20 @@ rmse_df <- bind_rows(
 # Using one palette for both Bias and RMSE ensures methods have the
 # same colours in both rows of the final figure.
 # -----------------------------------------------------------------
-all_methods <- union(levels(bias_df$method), levels(rmse_df$method))
+
+# keep a fixed legend order so the lines match what we want to compare
+want_methods <- c(
+  "SRS",
+  "NPS (200)",
+  "NPS (10000)",
+  "Combined (200)",
+  "Combined (10000)"
+)
+
+# keep any extra methods (if present) after the main five
+all_methods <- union(want_methods, union(levels(bias_df$method), levels(rmse_df$method)))
+
+# enforce method ordering across both data frames
 bias_df$method <- factor(bias_df$method, levels = all_methods)
 rmse_df$method <- factor(rmse_df$method, levels = all_methods)
 
@@ -162,11 +176,10 @@ p_bias_row <- ggplot(bias_df, aes(x = aU, y = bias, color = method, group = meth
   # facet into the 4 U-confounding scenarios (4 columns)
   facet_wrap(~ scenario, nrow = 1) +
 
-  # colours (keep as-is) + legend labels (rename only in the plot)
+  # colours (keep as-is) + keep legend order stable across scenarios
   scale_color_manual(
     values = pal_method,
-    breaks = all_methods,
-    labels = c("Combined", "NPS", "SRS")
+    breaks = all_methods
   ) +
 
   # labels
@@ -203,11 +216,10 @@ p_rmse_row <- ggplot(rmse_df, aes(x = aU, y = rmse, color = method, group = meth
   # facet into the 4 U-confounding scenarios (4 columns)
   facet_wrap(~ scenario, nrow = 1) +
 
-  # colours (keep as-is) + legend labels (rename only in the plot)
+  # colours (keep as-is) + keep legend order stable across scenarios
   scale_color_manual(
     values = pal_method,
-    breaks = all_methods,
-    labels = c("Combined", "NPS", "SRS")
+    breaks = all_methods
   ) +
 
   # labels

@@ -3,14 +3,15 @@
 This repo contains **7 scripts** that together form a simulation engine:
 
 - `00_packages.R`: Loads all dependencies (except the `here` package).
+
 - `01_population_data_generation.R`: Generates population data according to the following data-generating mechanism (DGM):
 
-  - **Z** ~ Normal(0, 1)  
-  - **U** ~ Normal(0, 1)  
-  - **Z** independent of **U**  
-  - **X** = b2·Z + b5·U  
-  - Centered interaction: **XZc** = X·Z − b2  
-  - **Y** = b1·X + b6·XZc + b3·Z + b4·U  
+  - **Z** ~ Normal(0, 1)
+  - **U** ~ Normal(0, 1)
+  - **Z** independent of **U**
+  - **X** = b2 * Z + b5 * U
+  - Centered interaction: **XZc** = (X * Z) - b2
+  - **Y** = b1 * X + b6 * XZc + b3 * Z + b4 * U
 
   Residual variances are chosen such that each variable has variance 1.
 
@@ -18,34 +19,28 @@ This repo contains **7 scripts** that together form a simulation engine:
   - **SRS**: draws a simple random sample from the population and drops **U**.
   - **NPS**: draws a non-probability sample from the population (keeps all variables) using:
 
-    - Selection index:
-      \[
-      \eta_i = a_X X_i + a_Y Y_i + a_Z Z_i + a_U U_i
-      \]
+    - Selection index (unit i):
+      - eta_i = aX * X_i + aY * Y_i + aZ * Z_i + aU * U_i
 
     - Weights:
-      \[
-      w_i = \exp(\eta_i)
-      \]
+      - w_i = exp(eta_i)
 
-    - Sampling rule: draw **exactly n units without replacement** with probabilities proportional to \(w_i\):
-      \[
-      \Pr(i \text{ selected}) \propto w_i
-      \]
+    - Sampling rule: draw **exactly n units without replacement** with probabilities proportional to w_i:
+      - P(i selected) proportional to w_i
 
-    Units with larger \(\eta_i\) (depending on \(a_X, a_Y, a_Z, a_U\)) are more likely to be selected, creating selection bias when any \(a \neq 0\).
+    Units with larger eta_i (depending on aX, aY, aZ, aU) are more likely to be selected, creating selection bias when any a != 0.
 
 - `03_analysis.R`: Contains three analysis functions (all return the estimated effect of **X** on **Y** plus an SE).
   - **SRS analysis**: OLS regression `Y ~ X + Z` (note: **U** is not available in the SRS by design).
   - **NPS analysis**: OLS regression `Y ~ X + Z + U`.
   - **Combined (two-step IPW)**:
-    1) Fit a sample-membership model (logistic regression) on the stacked SRS+NPS data: `source_nps ~ X + Z + Y`.  
-    2) Compute inverse-odds weights for the NPS: `w = (1 - p_hat) / p_hat` (optionally stabilized + trimmed).  
-    3) Fit a weighted outcome model on the NPS: `Y ~ X + Z + U` with weights `w`.  
+    1) Fit a sample-membership model (logistic regression) on stacked SRS+NPS data: `source_nps ~ X + Z + Y`.
+    2) Compute inverse-odds weights for the NPS: `w = (1 - p_hat) / p_hat` (optionally stabilized + trimmed).
+    3) Fit a weighted outcome model on the NPS: `Y ~ X + Z + U` with weights `w`.
     SEs are computed via bootstrap over the two-step procedure.
 
 - `04_simulator.R`: Runs the Monte Carlo simulation over a grid of **aU** values.
-  - For each replication and each `aU`, it draws:
+  - For each replication and each aU, it draws:
     - an **SRS** sample,
     - an **NPS** sample (optionally two sizes: “small” and “big data”),
     - and fits the corresponding estimators (SRS, NPS, Combined IPW).
